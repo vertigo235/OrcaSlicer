@@ -810,6 +810,8 @@ set(SLIC3R_GUI_SOURCES
     Utils/PresetUpdater.hpp
     Utils/PrintHost.cpp
     Utils/PrintHost.hpp
+    Utils/PrusaConnect.cpp
+    Utils/PrusaConnect.hpp
     Utils/Process.cpp
     Utils/Process.hpp
     Utils/RaycastManager.cpp

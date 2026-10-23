@@ -1232,6 +1232,20 @@ void PrintConfigDef::init_common_params()
     def->cli = ConfigOptionDef::nocli;
     def->set_default_value(new ConfigOptionString());
 
+    def = this->add("prusa_connect_organization_uuid", coString);
+    def->label = L("Prusa Connect organization");
+    def->tooltip = L("Selected Prusa Connect organization identifier.");
+    def->mode = comAdvanced;
+    def->cli = ConfigOptionDef::nocli;
+    def->set_default_value(new ConfigOptionString());
+
+    def = this->add("prusa_connect_printer_uuid", coString);
+    def->label = L("Prusa Connect printer");
+    def->tooltip = L("Selected Prusa Connect printer identifier.");
+    def->mode = comAdvanced;
+    def->cli = ConfigOptionDef::nocli;
+    def->set_default_value(new ConfigOptionString());
+
     def = this->add("printhost_port", coString);
     def->label = L("Printer");
     def->tooltip = L("Name of the printer.");

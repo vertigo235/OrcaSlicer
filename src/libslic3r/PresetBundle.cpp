@@ -5433,6 +5433,8 @@ DynamicPrintConfig PresetBundle::full_config_secure(std::optional<std::vector<in
     config.erase("printhost_user");    
     config.erase("printhost_password");    
     config.erase("printhost_port");
+    config.erase("prusa_connect_organization_uuid");
+    config.erase("prusa_connect_printer_uuid");
     return config;
 }
 

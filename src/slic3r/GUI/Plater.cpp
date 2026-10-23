@@ -75,6 +75,7 @@
 #include "slic3r/GUI/ParamsPanel.hpp"
 #include "slic3r/GUI/SceneRaycaster.hpp"
 #include "slic3r/GUI/PrinterWebView.hpp"
+#include "slic3r/Utils/PrusaConnect.hpp"
 #include "slic3r/GUI/ReleaseNote.hpp"
 #include "slic3r/GUI/Jobs/Worker.hpp"
 #include "slic3r/GUI/UnsavedChangesDialog.hpp"
@@ -145,6 +146,8 @@
 #include <wx/tglbtn.h>
 #include <wx/wupdlock.h>
 #include <wx/numdlg.h>
+#include <wx/choicdlg.h>
+#include <wx/weakref.h>
 #include <wx/debug.h>
 #include <wx/busyinfo.h>
 #include <wx/event.h>
@@ -3359,7 +3362,11 @@ Sidebar::Sidebar(Plater *parent)
                                                  wxBU_EXACTFIT | wxNO_BORDER, false, 16); // ORCA match icon size with other icons as 16x16
     ams_btn->SetToolTip(_L("Synchronize filament list from AMS"));
     ams_btn->Bind(wxEVT_BUTTON, [this](wxCommandEvent &e) {
-        sync_ams_list();
+        const auto& config = wxGetApp().preset_bundle->printers.get_edited_preset().config;
+        if (config.opt_enum<PrintHostType>("host_type") == htPrusaConnect)
+            sync_prusa_connect_filaments();
+        else
+            sync_ams_list();
     });
 
     ams_btn->Bind(wxEVT_UPDATE_UI, &Sidebar::update_sync_ams_btn_enable, this);
@@ -3815,7 +3822,10 @@ void Sidebar::update_all_preset_comboboxes()
 
         // ORCA: show/hide sync-ams button based on filament sync mode
         auto agent = wxGetApp().getAgent();
-        if (agent && agent->get_filament_sync_mode() != FilamentSyncMode::none)
+        const bool is_prusa_connect = cfg.opt_enum<PrintHostType>("host_type") == htPrusaConnect;
+        p->m_bpButton_ams_filament->SetToolTip(is_prusa_connect ? _L("Refresh and synchronize filament data from Prusa Connect")
+                                                                  : _L("Synchronize filament list from AMS"));
+        if (is_prusa_connect || (agent && agent->get_filament_sync_mode() != FilamentSyncMode::none))
             p->m_bpButton_ams_filament->Show();
         else
             p->m_bpButton_ams_filament->Hide();
@@ -3831,7 +3841,7 @@ void Sidebar::update_all_preset_comboboxes()
             url = file_url_from_path(boost::filesystem::path(resources_dir()) / "web/orca/missing_connection.html");
         else {
             const auto host_type = cfg.option<ConfigOptionEnum<PrintHostType>>("host_type")->value;
-            if (cfg.has("printhost_apikey") && (host_type != htSimplyPrint))
+            if (cfg.has("printhost_apikey") && host_type != htSimplyPrint && host_type != htPrusaConnect)
                 apikey = cfg.opt_string("printhost_apikey");
             print_btn_type = (preset_bundle.is_bbl_vendor() || wxGetApp().app_config->get_bool("use_printer_agents"))
                                  ? MainFrame::PrintSelectType::ePrintPlate
@@ -6296,19 +6306,198 @@ void Sidebar::load_ams_list(MachineObject* obj)
     p->combo_printer->update();
 }
 
+namespace {
+
+std::map<int, DynamicPrintConfig> build_prusa_connect_ams_list(const PrusaConnectPrinter& printer)
+{
+    std::map<int, DynamicPrintConfig> result;
+    const auto* bundle = wxGetApp().preset_bundle;
+    const auto slots = map_prusa_connect_tools_to_ams(printer);
+    for (const PrusaConnectAmsSlot& tool : slots) {
+        int slot = tool.slot;
+        while (result.find(0x10000 + slot) != result.end())
+            ++slot;
+        DynamicPrintConfig config;
+        config.set_key_value("ams_id", new ConfigOptionStrings{"0"});
+        config.set_key_value("slot_id", new ConfigOptionStrings{std::to_string(slot)});
+        config.set_key_value("tray_name", new ConfigOptionStrings{into_u8(format_wxstr(_L("Prusa Connect %1%"), slot + 1))});
+        config.set_key_value("filament_colour_type", new ConfigOptionStrings{"0"});
+        config.set_key_value("filament_multi_colour", new ConfigOptionStrings{});
+        config.set_key_value("filament_changed", new ConfigOptionBool{true});
+        config.set_key_value("filament_vendor", new ConfigOptionStrings{""});
+        config.set_key_value("filament_is_support", new ConfigOptionBools{false});
+
+        if (!tool.has_material) {
+            config.set_key_value("filament_id", new ConfigOptionStrings{""});
+            config.set_key_value("filament_type", new ConfigOptionStrings{""});
+            config.set_key_value("filament_colour", new ConfigOptionStrings{""});
+            config.set_key_value("filament_exist", new ConfigOptionBools{false});
+            config.set_key_value("filament_slot_placeholder", new ConfigOptionBools{true});
+        } else {
+            const std::string filament_type = tool.material_type.empty() ? tool.material_name : tool.material_type;
+            std::string filament_id = tool.material_id;
+            if (bundle != nullptr && (filament_id.empty() || !bundle->get_filament_by_filament_id(filament_id).has_value())) {
+                filament_id = bundle->filaments.filament_id_by_type(filament_type);
+            }
+            config.set_key_value("filament_id", new ConfigOptionStrings{filament_id});
+            config.set_key_value("filament_type", new ConfigOptionStrings{filament_type});
+            config.set_key_value("filament_vendor", new ConfigOptionStrings{tool.brand});
+            config.set_key_value("filament_colour", new ConfigOptionStrings{tool.color});
+            config.set_key_value("filament_multi_colour", new ConfigOptionStrings{tool.color});
+            config.set_key_value("filament_exist", new ConfigOptionBools{true});
+            config.set_key_value("filament_slot_placeholder", new ConfigOptionBools{false});
+            if (bundle != nullptr && !filament_id.empty()) {
+                const auto info = bundle->get_filament_by_filament_id(filament_id);
+                config.set_key_value("filament_is_support", new ConfigOptionBools{info.has_value() && info->is_support});
+            }
+        }
+        result.emplace(0x10000 + slot, std::move(config));
+    }
+    return result;
+}
+
+} // namespace
+
+void Sidebar::sync_prusa_connect_filaments()
+{
+    wxWeakRef<Sidebar> weak_this(this);
+    PrinterWebView* view = PrinterWebView::if_built();
+    if (view == nullptr) {
+        MessageDialog dlg(this, _L("Open the Prusa Connect Device tab and sign in before synchronizing filaments."),
+                          _L("Prusa Connect"), wxOK);
+        dlg.ShowModal();
+        return;
+    }
+
+    const std::string request_preset_name = wxGetApp().preset_bundle->printers.get_edited_preset().name;
+    if (!view->request_prusa_connect_printers([weak_this, request_preset_name](const std::string& envelope) {
+        if (!weak_this)
+            return;
+        Sidebar* self = weak_this.get();
+        const auto& current_preset = wxGetApp().preset_bundle->printers.get_edited_preset();
+        if (current_preset.name != request_preset_name || current_preset.config.opt_enum<PrintHostType>("host_type") != htPrusaConnect)
+            return;
+        const auto response = parse_prusa_connect_response(envelope);
+        if (!response.ok) {
+            const wxString message = response.error.empty() ? _L("Unable to retrieve Prusa Connect printers.") : from_u8(response.error);
+            MessageDialog dlg(self, message, _L("Prusa Connect"), wxOK);
+            dlg.ShowModal();
+            return;
+        }
+
+        std::string printer_error;
+        const auto printers = parse_prusa_connect_printers(response.body, printer_error);
+        if (printers.empty()) {
+            const wxString message = printer_error.empty() ? _L("No Prusa Connect printers were found for this account.") : from_u8(printer_error);
+            MessageDialog dlg(self, message, _L("Prusa Connect"), wxOK);
+            dlg.ShowModal();
+            return;
+        }
+
+        auto& printer_config = wxGetApp().preset_bundle->printers.get_edited_preset().config;
+        const std::string configured_id = printer_config.opt_string("prusa_connect_printer_uuid");
+        size_t selected = printers.size();
+        for (size_t i = 0; i < printers.size(); ++i) {
+            if (printers[i].id == configured_id) {
+                selected = i;
+                break;
+            }
+        }
+        if (selected == printers.size() && printers.size() > 1) {
+            wxArrayString choices;
+            for (const auto& printer : printers)
+                choices.Add(from_u8(printer.name.empty() ? printer.id : printer.name));
+            wxSingleChoiceDialog dialog(self, _L("Select the Prusa Connect printer to synchronize."), _L("Prusa Connect"), choices);
+            if (dialog.ShowModal() != wxID_OK)
+                return;
+            selected = static_cast<size_t>(dialog.GetSelection());
+        }
+        if (selected == printers.size())
+            selected = 0;
+
+        const auto& printer = printers[selected];
+        const bool same_configured_printer = printer.id == configured_id;
+        const std::string organization_id = !printer.organization_id.empty()
+                                                 ? printer.organization_id
+                                                 : (same_configured_printer ? printer_config.opt_string("prusa_connect_organization_uuid") : std::string());
+        if (organization_id.empty()) {
+            MessageDialog dlg(self, _L("The selected Prusa Connect printer has no organization identifier."), _L("Prusa Connect"), wxOK);
+            dlg.ShowModal();
+            return;
+        }
+
+        const std::string selected_printer_id = printer.id;
+        const std::string selected_preset_name = wxGetApp().preset_bundle->printers.get_edited_preset().name;
+        PrinterWebView* selected_view = PrinterWebView::if_built();
+        if (selected_view == nullptr)
+            return;
+        if (!selected_view->request_prusa_connect_filaments(organization_id, selected_printer_id, [weak_this, organization_id, selected_printer_id, selected_preset_name](const std::string& filament_envelope) {
+            if (!weak_this)
+                return;
+            Sidebar* self = weak_this.get();
+            const auto& current_preset = wxGetApp().preset_bundle->printers.get_edited_preset();
+            if (current_preset.name != selected_preset_name || current_preset.config.opt_enum<PrintHostType>("host_type") != htPrusaConnect)
+                return;
+            const auto filament_response = parse_prusa_connect_response(filament_envelope);
+            if (!filament_response.ok) {
+                const wxString message = filament_response.error.empty() ? _L("Unable to retrieve Prusa Connect filament data.") : from_u8(filament_response.error);
+                MessageDialog dlg(self, message, _L("Prusa Connect"), wxOK);
+                dlg.ShowModal();
+                return;
+            }
+            const auto parsed = parse_prusa_connect_graphql(filament_response.body);
+            if (!parsed.success) {
+                const wxString message = parsed.error.empty() ? _L("Prusa Connect returned invalid filament data.") : from_u8(parsed.error);
+                MessageDialog dlg(self, message, _L("Prusa Connect"), wxOK);
+                dlg.ShowModal();
+                return;
+            }
+            auto& selected_config = wxGetApp().preset_bundle->printers.get_edited_preset().config;
+            selected_config.set_key_value("prusa_connect_organization_uuid", new ConfigOptionString{organization_id});
+            selected_config.set_key_value("prusa_connect_printer_uuid", new ConfigOptionString{selected_printer_id});
+            wxGetApp().preset_bundle->printers.get_edited_preset().set_dirty();
+            self->m_prusa_connect_device_id = selected_printer_id;
+            self->m_prusa_connect_filament_list = build_prusa_connect_ams_list(parsed.printer);
+            if (auto* printer_tab = wxGetApp().get_tab(Preset::TYPE_PRINTER))
+                printer_tab->update_dirty();
+            self->sync_ams_list(false);
+        })) {
+            MessageDialog dlg(self, _L("Unable to start the Prusa Connect request."), _L("Prusa Connect"), wxOK);
+            dlg.ShowModal();
+        }
+    })) {
+        MessageDialog dlg(this, _L("Unable to start the Prusa Connect request."), _L("Prusa Connect"), wxOK);
+        dlg.ShowModal();
+    }
+}
+
 void Sidebar::sync_ams_list(bool is_from_big_sync_btn)
 {
     wxBusyCursor cursor;
-    // Force load ams list
+    const bool host_is_prusa_connect = wxGetApp().preset_bundle->printers.get_edited_preset().config.opt_enum<PrintHostType>("host_type") == htPrusaConnect;
+    const bool is_prusa_connect = host_is_prusa_connect && m_prusa_connect_filament_list.has_value();
+    if (!is_prusa_connect)
+        m_prusa_connect_filament_list.reset();
     auto obj = wxGetApp().getDeviceManager()->get_selected_machine();
-    if (!obj)
+    if (!obj && !is_prusa_connect)
         return;
-    GUI::wxGetApp().sidebar().load_ams_list(obj);
+    if (is_prusa_connect) {
+        p->ams_list_device = "prusa-connect:" + m_prusa_connect_device_id;
+        wxGetApp().preset_bundle->filament_ams_list = std::move(*m_prusa_connect_filament_list);
+        m_prusa_connect_filament_list.reset();
+    } else {
+        GUI::wxGetApp().sidebar().load_ams_list(obj);
+    }
 
     auto & list = wxGetApp().preset_bundle->filament_ams_list;
     if (list.empty()) {
-        auto printer_name = p->plater->get_selected_printer_name_in_combox();
-        p->plater->pop_warning_and_go_to_device_page(printer_name, Plater::PrinterWarningType::NOT_CONNECTED, _L("Sync printer information"));
+        if (is_prusa_connect) {
+            MessageDialog dlg(this, _L("Prusa Connect returned no filament tools."), _L("Prusa Connect"), wxOK);
+            dlg.ShowModal();
+        } else {
+            auto printer_name = p->plater->get_selected_printer_name_in_combox();
+            p->plater->pop_warning_and_go_to_device_page(printer_name, Plater::PrinterWarningType::NOT_CONNECTED, _L("Sync printer information"));
+        }
         return;
     }
     bool exist_at_list_one_filament =false;
@@ -6321,7 +6510,12 @@ void Sidebar::sync_ams_list(bool is_from_big_sync_btn)
             break;
         }
     }
-    if (!exist_at_list_one_filament) {
+    if (!exist_at_list_one_filament && is_prusa_connect) {
+        MessageDialog dlg(this, _L("Prusa Connect reports that no filament is loaded."), _L("Prusa Connect"), wxOK);
+        dlg.ShowModal();
+        return;
+    }
+    if (!exist_at_list_one_filament && !is_prusa_connect) {
         if (!obj->is_filament_installed()) {
             p->plater->pop_warning_and_go_to_device_page("", Plater::PrinterWarningType::UNINSTALL_FILAMENT, _L("Sync printer information"));
             return;
@@ -6329,7 +6523,7 @@ void Sidebar::sync_ams_list(bool is_from_big_sync_btn)
         p->plater->pop_warning_and_go_to_device_page("", Plater::PrinterWarningType::EMPTY_FILAMENT, _L("Sync printer information"));
         return;
     }
-    if (!wxGetApp().plater()->is_same_printer_for_connected_and_selected()) {
+    if (!is_prusa_connect && !wxGetApp().plater()->is_same_printer_for_connected_and_selected()) {
         return;
     }
     std::string ams_filament_ids = wxGetApp().app_config->get("ams_filament_ids", p->ams_list_device);
@@ -6347,7 +6541,10 @@ void Sidebar::sync_ams_list(bool is_from_big_sync_btn)
         m_sync_dlg->set_info(temp_info);
     }
     int dlg_res{(int) wxID_CANCEL};
-    if (m_sync_dlg->is_need_show()) {
+    SyncAmsInfoDialog::SyncResult sync_result;
+    if (is_prusa_connect) {
+        dlg_res = wxID_YES;
+    } else if (m_sync_dlg->is_need_show()) {
         m_sync_dlg->deal_only_exist_ext_spool(obj);
         if (m_sync_dlg->is_dirty_filament()) {
             wxGetApp().get_tab(Preset::TYPE_FILAMENT)->select_preset(wxGetApp().preset_bundle->filament_presets[0], false, "", false, true);
@@ -6356,12 +6553,13 @@ void Sidebar::sync_ams_list(bool is_from_big_sync_btn)
         }
         m_sync_dlg->set_check_dirty_fialment(false);
         dlg_res = m_sync_dlg->ShowModal();
+        sync_result = m_sync_dlg->get_result();
     } else {
-        dlg_res =(int) wxID_YES;
+        dlg_res = (int) wxID_YES;
+        sync_result = m_sync_dlg->get_result();
     }
     if (dlg_res == wxID_CANCEL)
         return;
-    auto sync_result = m_sync_dlg->get_result();
     if (!sync_result.is_same_printer) {
         BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << "check error: sync_result.is_same_printer value is false";
         return;
