@@ -700,9 +700,9 @@ void PhysicalPrinterDialog::update(bool printer_change)
                 m_optgroup->hide_field(opt_key);
             supports_multiple_printers = opt->value == htRepetier || opt->value == htObico;
 
-            if (opt->value == htPrusaConnect) { // automatically show default prusaconnect address
+            if (opt->value == htPrusaConnect) { // Prusa Connect uses its canonical web application URL.
                 if (Field* printhost_field = m_optgroup->get_field("print_host"); printhost_field) {
-                    if (wxTextCtrl* temp = dynamic_cast<TextCtrl*>(printhost_field)->text_ctrl(); temp && temp->GetValue().IsEmpty()) {
+                    if (wxTextCtrl* temp = dynamic_cast<TextCtrl*>(printhost_field)->text_ctrl(); temp) {
                         temp->SetValue(L"https://connect.prusa3d.com");
                         m_config->opt_string("print_host") = "https://connect.prusa3d.com";
                     }
