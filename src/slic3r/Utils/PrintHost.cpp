@@ -105,6 +105,11 @@ std::string PrintHost::get_print_host_webui(DynamicPrintConfig* config)
     const auto  host_type     = host_type_opt != nullptr ? host_type_opt->value : htOctoPrint;
 
     switch (host_type) {
+    case htPrusaConnect:
+        // Connect authentication and filament synchronization run in the embedded
+        // Connect WebView; never reuse a stale local-host value from another preset.
+        webui_url = "https://connect.prusa3d.com";
+        break;
     case htElegooLink: {
         webui_url = ElegooLink::get_print_host_webui(config);
         break;
