@@ -90,7 +90,11 @@ try {
     if(!q.organizationId||!q.printerId){clearTimeout(timer);send({kind:q.kind,ok:false,error:"Connect organization or printer is not selected"});return;}
     url="https://connect-api.prusa3d.com/graphql";
     headers["Content-Type"]="application/json";
-    init={method:"POST",headers:headers,credentials:"include",body:JSON.stringify({query:q.query,variables:{organizationId:q.organizationId,printerId:q.printerId,withMaterialDetails:true},operationName:"GetPrinterFffTelemetry"}),signal:controller.signal};
+    // Match the Connect web app's cross-origin GraphQL request. Do not include
+    // cookies here: the API authorizes with the bearer header, and credentials
+    // mode "include" would require CORS credentials from connect-api.
+    headers["graphql-client-name"]="connect-web";
+    init={method:"POST",headers:headers,credentials:"same-origin",body:JSON.stringify({query:q.query,variables:{organizationId:q.organizationId,printerId:q.printerId,withMaterialDetails:true},operationName:"GetPrinterFffTelemetry"}),signal:controller.signal};
   }
   const response=await fetch(url,init);
   const body=await response.text();
