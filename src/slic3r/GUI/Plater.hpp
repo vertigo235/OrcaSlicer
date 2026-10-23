@@ -16,6 +16,7 @@
 #include "libslic3r/libslic3r.h"
 #include <atomic>
 #include <memory>
+#include <optional>
 #include "slic3r/GUI/Event.hpp"
 #include "slic3r/GUI/I18N.hpp"
 #include <string>
@@ -221,6 +222,7 @@ public:
     void load_ams_list(MachineObject* obj);
     std::map<int, DynamicPrintConfig> build_filament_ams_list(MachineObject* obj);
     void sync_ams_list(bool is_from_big_sync_btn = false);
+    void sync_prusa_connect_filaments();
     bool sync_extruder_list();
     bool is_fila_switch_ready();
     void reset_fila_switch();
@@ -328,6 +330,9 @@ private:
 private:
     struct priv;
     std::unique_ptr<priv> p;
+
+    std::optional<std::map<int, DynamicPrintConfig>> m_prusa_connect_filament_list;
+    std::string m_prusa_connect_device_id;
 
     wxBoxSizer* m_scrolled_sizer = nullptr;
     bool            m_need_auto_sync_after_connect_printer{false};
