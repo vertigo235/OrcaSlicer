@@ -20,18 +20,22 @@
 
 #include <nlohmann/json.hpp>
 
+#include <wx/chartype.h>
 #include <wx/event.h>
 #include <wx/panel.h>
 #include <wx/gdicmn.h>
 #include <wx/log.h>
 #include <wx/sizer.h>
 #include <wx/string.h>
+#include <wx/timer.h>
 #include <wx/toolbar.h>
 #include "slic3r/Utils/PrusaConnect.hpp"
 #include <wx/utils.h>
 #include <wx/webview.h>
 
+#include <cstdint>
 #include <memory>
+#include <string>
 #include <utility>
 
 class wxWindow;
