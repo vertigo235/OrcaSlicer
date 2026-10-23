@@ -6,7 +6,9 @@
 #include <climits>
 #include <cstdlib>
 #include <initializer_list>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
