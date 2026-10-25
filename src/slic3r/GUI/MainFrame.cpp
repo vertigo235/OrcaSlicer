@@ -4617,7 +4617,11 @@ void MainFrame::load_printer_url()
     wxString url = from_u8(PrintHost::get_print_host_webui(&cfg));
     wxString apikey;
     const auto host_type = cfg.option<ConfigOptionEnum<PrintHostType>>("host_type")->value;
-    if (cfg.has("printhost_apikey") && host_type != htSimplyPrint)
+    // Prusa Connect's web UI authenticates with its own OAuth/PKCE flow. Passing the
+    // print-host API key into the embedded page makes PrinterWebView add X-API-Key to
+    // every fetch, including the cross-origin OAuth token exchange, which triggers a
+    // CORS preflight and results in the web UI's generic "Failed to fetch" error.
+    if (cfg.has("printhost_apikey") && host_type != htSimplyPrint && host_type != htPrusaConnect)
         apikey = cfg.opt_string("printhost_apikey");
     if (!url.empty()) {
         load_printer_url(url, apikey);

@@ -392,6 +392,101 @@ TEST_CASE("Printer extruder count tolerates missing nozzle diameter", "[Preset][
     CHECK(bundle.get_printer_extruder_count() == 2);
 }
 
+TEST_CASE("Prusa Connect sync keeps a matching local profile and only changes its color", "[Preset][PrusaConnect]")
+{
+    PresetBundle bundle;
+    bundle.printers.get_edited_preset().config.set_key_value("nozzle_diameter", new ConfigOptionFloats{0.4});
+
+    auto add_filament = [&bundle](const std::string &name, const std::string &type, const std::string &id, bool system) {
+        DynamicPrintConfig config(bundle.filaments.default_preset().config);
+        config.option<ConfigOptionStrings>("filament_type", true)->values = {type};
+        Preset &preset = bundle.filaments.load_preset({}, name, std::move(config), false);
+        preset.filament_id = id;
+        preset.is_system = system;
+        preset.is_visible = true;
+        preset.is_compatible = true;
+    };
+    add_filament("Generic PETG", "PETG", "GENERIC_PETG", true);
+    add_filament("Prusament PETG", "PETG", "PRUSAMENT_PETG", true);
+    add_filament("My PETG", "PETG", "USER_PETG", false);
+
+    bundle.filament_presets = {"My PETG"};
+    bundle.project_config.option<ConfigOptionStrings>("filament_colour", true)->values = {"#101010"};
+    bundle.project_config.option<ConfigOptionStrings>("filament_colour_type", true)->values = {"0"};
+    bundle.project_config.option<ConfigOptionStrings>("filament_multi_colour", true)->values = {"#101010"};
+    bundle.project_config.option<ConfigOptionInts>("filament_map", true)->values = {1};
+    bundle.project_config.option<ConfigOptionInts>("filament_volume_map", true)->values = {0};
+
+    DynamicPrintConfig ams;
+    ams.set_key_value("ams_id", new ConfigOptionStrings{"0"});
+    ams.set_key_value("slot_id", new ConfigOptionStrings{"0"});
+    ams.set_key_value("filament_id", new ConfigOptionStrings{"PRUSAMENT_PETG"});
+    ams.set_key_value("filament_type", new ConfigOptionStrings{"PETG"});
+    ams.set_key_value("filament_colour", new ConfigOptionStrings{"#AABBCC"});
+    ams.set_key_value("filament_colour_type", new ConfigOptionStrings{"0"});
+    ams.set_key_value("filament_multi_colour", new ConfigOptionStrings{"#AABBCC"});
+    ams.set_key_value("filament_changed", new ConfigOptionBool{true});
+    ams.set_key_value("prusa_connect_filament", new ConfigOptionBool{true});
+    ams.set_key_value("filament_slot_placeholder", new ConfigOptionBools{false});
+    bundle.filament_ams_list.emplace(0, std::move(ams));
+
+    std::vector<std::pair<DynamicPrintConfig *, std::string>> unknowns;
+    std::map<int, AMSMapInfo> maps;
+    MergeFilamentInfo merge_info;
+    REQUIRE(bundle.sync_ams_list(unknowns, false, maps, false, merge_info) == 1);
+    REQUIRE(bundle.filament_presets.size() == 1);
+    CHECK(bundle.filament_presets[0] == "My PETG");
+    CHECK(bundle.project_config.option<ConfigOptionStrings>("filament_colour")->values[0] == "#AABBCC");
+}
+
+TEST_CASE("Prusa Connect sync selects a local profile when the material type changes", "[Preset][PrusaConnect]")
+{
+    PresetBundle bundle;
+    bundle.printers.get_edited_preset().config.set_key_value("nozzle_diameter", new ConfigOptionFloats{0.4});
+
+    auto add_filament = [&bundle](const std::string &name, const std::string &type, const std::string &id, bool system) {
+        DynamicPrintConfig config(bundle.filaments.default_preset().config);
+        config.option<ConfigOptionStrings>("filament_type", true)->values = {type};
+        Preset &preset = bundle.filaments.load_preset({}, name, std::move(config), false);
+        preset.filament_id = id;
+        preset.is_system = system;
+        preset.is_visible = true;
+        preset.is_compatible = true;
+    };
+    add_filament("Generic PETG", "PETG", "GENERIC_PETG", true);
+    add_filament("Generic PLA", "PLA", "GENERIC_PLA", true);
+    add_filament("My PLA", "PLA", "USER_PLA", false);
+    add_filament("My PETG", "PETG", "USER_PETG", false);
+
+    bundle.filament_presets = {"My PETG"};
+    bundle.project_config.option<ConfigOptionStrings>("filament_colour", true)->values = {"#101010"};
+    bundle.project_config.option<ConfigOptionStrings>("filament_colour_type", true)->values = {"0"};
+    bundle.project_config.option<ConfigOptionStrings>("filament_multi_colour", true)->values = {"#101010"};
+    bundle.project_config.option<ConfigOptionInts>("filament_map", true)->values = {1};
+    bundle.project_config.option<ConfigOptionInts>("filament_volume_map", true)->values = {0};
+
+    DynamicPrintConfig ams;
+    ams.set_key_value("ams_id", new ConfigOptionStrings{"0"});
+    ams.set_key_value("slot_id", new ConfigOptionStrings{"0"});
+    ams.set_key_value("filament_id", new ConfigOptionStrings{"PRUSAMENT_PLA"});
+    ams.set_key_value("filament_type", new ConfigOptionStrings{"PLA"});
+    ams.set_key_value("filament_colour", new ConfigOptionStrings{"#112233"});
+    ams.set_key_value("filament_colour_type", new ConfigOptionStrings{"0"});
+    ams.set_key_value("filament_multi_colour", new ConfigOptionStrings{"#112233"});
+    ams.set_key_value("filament_changed", new ConfigOptionBool{true});
+    ams.set_key_value("prusa_connect_filament", new ConfigOptionBool{true});
+    ams.set_key_value("filament_slot_placeholder", new ConfigOptionBools{false});
+    bundle.filament_ams_list.emplace(0, std::move(ams));
+
+    std::vector<std::pair<DynamicPrintConfig *, std::string>> unknowns;
+    std::map<int, AMSMapInfo> maps;
+    MergeFilamentInfo merge_info;
+    REQUIRE(bundle.sync_ams_list(unknowns, false, maps, false, merge_info) == 1);
+    REQUIRE(bundle.filament_presets.size() == 1);
+    CHECK(bundle.filament_presets[0] == "My PLA");
+    CHECK(bundle.project_config.option<ConfigOptionStrings>("filament_colour")->values[0] == "#112233");
+}
+
 TEST_CASE("Reloading one local bundle preserves unrelated and modified presets", "[Preset][Bundle]")
 {
     using Catch::Matchers::WithinAbs;

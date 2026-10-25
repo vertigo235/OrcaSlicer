@@ -396,6 +396,8 @@ void PhysicalPrinterDialog::build_printhost_settings(ConfigOptionsGroup* m_optgr
     Line port_line = m_optgroup->create_single_option_line(option);
     port_line.append_widget(print_host_printers);
     m_optgroup->append_line(port_line);
+    m_optgroup->append_single_option_line("prusa_connect_organization_uuid");
+    m_optgroup->append_single_option_line("prusa_connect_printer_uuid");
 
     const auto ca_file_hint = _u8L("HTTPS CA file is optional. It is only needed if you use HTTPS with a self-signed certificate.");
 
@@ -679,6 +681,8 @@ void PhysicalPrinterDialog::update(bool printer_change)
                 }
             }
         }
+        m_optgroup->hide_field("prusa_connect_organization_uuid");
+        m_optgroup->hide_field("prusa_connect_printer_uuid");
         if (opt->value == htPrusaLink) { // PrusaConnect does NOT allow http digest
             m_optgroup->show_field("printhost_authorization_type");
             AuthorizationType auth_type = m_config->option<ConfigOptionEnum<AuthorizationType>>("printhost_authorization_type")->value;
@@ -688,13 +692,17 @@ void PhysicalPrinterDialog::update(bool printer_change)
         } else {
             m_optgroup->hide_field("printhost_authorization_type");
             m_optgroup->show_field("printhost_apikey", true);
+            if (opt->value == htPrusaConnect) {
+                m_optgroup->show_field("prusa_connect_organization_uuid");
+                m_optgroup->show_field("prusa_connect_printer_uuid");
+            }
             for (const std::string& opt_key : std::vector<std::string>{ "printhost_user", "printhost_password" })
                 m_optgroup->hide_field(opt_key);
             supports_multiple_printers = opt->value == htRepetier || opt->value == htObico;
 
-            if (opt->value == htPrusaConnect) { // automatically show default prusaconnect address
+            if (opt->value == htPrusaConnect) { // Prusa Connect uses its canonical web application URL.
                 if (Field* printhost_field = m_optgroup->get_field("print_host"); printhost_field) {
-                    if (wxTextCtrl* temp = dynamic_cast<TextCtrl*>(printhost_field)->text_ctrl(); temp && temp->GetValue().IsEmpty()) {
+                    if (wxTextCtrl* temp = dynamic_cast<TextCtrl*>(printhost_field)->text_ctrl(); temp) {
                         temp->SetValue(L"https://connect.prusa3d.com");
                         m_config->opt_string("print_host") = "https://connect.prusa3d.com";
                     }
@@ -881,7 +889,8 @@ void PhysicalPrinterDialog::on_dpi_changed(const wxRect& suggested_rect)
 
 void PhysicalPrinterDialog::check_host_key_valid()
 {
-    std::vector<std::string> keys = {"print_host", "print_host_webui", "printhost_apikey", "flashforge_serial_number", "printhost_cafile", "printhost_user", "printhost_password", "printhost_port"};
+    std::vector<std::string> keys = {"print_host", "print_host_webui", "printhost_apikey", "flashforge_serial_number", "printhost_cafile", "printhost_user", "printhost_password", "printhost_port",
+                                      "prusa_connect_organization_uuid", "prusa_connect_printer_uuid"};
     for (auto &key : keys) {
         auto it = m_config->option<ConfigOptionString>(key);
         if (!it) m_config->set_key_value(key, new ConfigOptionString(""));
