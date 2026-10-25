@@ -6329,6 +6329,10 @@ std::map<int, DynamicPrintConfig> build_prusa_connect_ams_list(const PrusaConnec
         config.set_key_value("filament_colour_type", new ConfigOptionStrings{"0"});
         config.set_key_value("filament_multi_colour", new ConfigOptionStrings{});
         config.set_key_value("filament_changed", new ConfigOptionBool{true});
+        // The Connect material id identifies the spool, not the local Orca profile
+        // the user wants to use. Keep the source marker so AMS sync can match a
+        // compatible local profile by material type before trying that id.
+        config.set_key_value("prusa_connect_filament", new ConfigOptionBool{true});
         config.set_key_value("filament_vendor", new ConfigOptionStrings{""});
         config.set_key_value("filament_is_support", new ConfigOptionBools{false});
 

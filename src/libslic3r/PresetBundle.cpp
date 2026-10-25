@@ -4511,6 +4511,27 @@ static void warn_ambiguous_filament_id_match(const PresetCollection &filaments, 
                                    << "\", also matches " << others;
 }
 
+// Connect's material id identifies the loaded spool, but it does not identify the
+// local Orca profile the user wants to use. Match a simple material subtype (PLA,
+// PETG, TPU, ...) without treating a hyphenated material such as PA-CF as PA.
+static bool prusa_connect_filament_type_matches(const std::string &preset_type, const std::string &material_type)
+{
+    if (preset_type.empty() || material_type.empty())
+        return false;
+
+    std::string preset = preset_type;
+    std::string material = material_type;
+    boost::algorithm::trim(preset);
+    boost::algorithm::trim(material);
+    boost::to_upper(preset);
+    boost::to_upper(material);
+    if (preset == material)
+        return true;
+
+    return material.size() > preset.size() && material.compare(0, preset.size(), preset) == 0 &&
+           std::isspace(static_cast<unsigned char>(material[preset.size()]));
+}
+
 void PresetBundle::get_ams_cobox_infos(AMSComboInfo& combox_info)
 {
     combox_info.clear();
@@ -4633,10 +4654,54 @@ unsigned int PresetBundle::sync_ams_list(std::vector<std::pair<DynamicPrintConfi
         }
         bool has_type = false;
         auto filament_type = ams.opt_string("filament_type", 0u);
-        auto iter = std::find_if(filaments.begin(), filaments.end(), [this, &filament_id, &has_type, filament_type](auto &f) {
-            has_type |= f.config.opt_string("filament_type", 0u) == filament_type;
-            return f.is_compatible && filaments.get_preset_base(f) == &f && f.filament_id == filament_id; });
-        warn_ambiguous_filament_id_match(filaments, iter, filament_id);
+        const bool is_prusa_connect = ams.has("prusa_connect_filament") &&
+                                      ams.opt_bool("prusa_connect_filament");
+        auto iter = filaments.end();
+        if (is_prusa_connect && !filament_type.empty()) {
+            auto matching_type = [&filament_type](const Preset &preset) {
+                return preset.is_compatible &&
+                       prusa_connect_filament_type_matches(preset.config.opt_string("filament_type", 0u), filament_type);
+            };
+
+            // Keep the profile already assigned to this slot when its material
+            // type agrees with Connect. This makes synchronization a color-only
+            // update for a matching slot, including user-created profiles.
+            const size_t slot_index = ams_filament_presets.size();
+            if (slot_index < this->filament_presets.size()) {
+                const std::string &selected_name = this->filament_presets[slot_index];
+                iter = std::find_if(filaments.begin(), filaments.end(), [&selected_name, &matching_type](const Preset &preset) {
+                    return preset.name == selected_name && matching_type(preset);
+                });
+            }
+
+            if (iter == filaments.end()) {
+                // For a type change, reuse an available user profile of that
+                // type before falling back to the shipped generic preset. This
+                // avoids replacing every Connect spool with the brand profile
+                // carried by Connect's material id.
+                iter = std::find_if(filaments.begin(), filaments.end(), [&matching_type](const Preset &preset) {
+                    return matching_type(preset) && !preset.is_system && !preset.is_default && preset.is_visible;
+                });
+            }
+            if (iter == filaments.end()) {
+                iter = std::find_if(filaments.begin(), filaments.end(), [this, &filament_type](const Preset &preset) {
+                    return preset.is_compatible && preset.is_system && preset.is_visible &&
+                           filaments.get_preset_base(preset) == &preset &&
+                           prusa_connect_filament_type_matches(preset.config.opt_string("filament_type", 0u), filament_type);
+                });
+            }
+            if (iter != filaments.end())
+                BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": Prusa Connect material type " << filament_type
+                                         << " matched local filament preset " << iter->name;
+        }
+        if (iter == filaments.end()) {
+            iter = std::find_if(filaments.begin(), filaments.end(), [this, &filament_id, &has_type, filament_type, is_prusa_connect](auto &f) {
+                has_type |= f.config.opt_string("filament_type", 0u) == filament_type;
+                return f.is_compatible && filaments.get_preset_base(f) == &f && f.filament_id == filament_id &&
+                       (!is_prusa_connect || filament_type.empty() ||
+                        prusa_connect_filament_type_matches(f.config.opt_string("filament_type", 0u), filament_type)); });
+            warn_ambiguous_filament_id_match(filaments, iter, filament_id);
+        }
         if (iter == filaments.end()) {
             BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(": filament_id %1% not found or system or compatible") % filament_id;
             if (!filament_type.empty()) {
@@ -4677,8 +4742,10 @@ unsigned int PresetBundle::sync_ams_list(std::vector<std::pair<DynamicPrintConfi
                 }
             }
             if (iter == filaments.end()) {
-                // Prefer old selection
-                if (ams_filament_presets.size() < this->filament_presets.size()) {
+                // Preserve the old selection for legacy AMS data, but do not
+                // retain a mismatched profile for a typed Connect material.
+                if ((!is_prusa_connect || filament_type.empty()) &&
+                    ams_filament_presets.size() < this->filament_presets.size()) {
                     ams_filament_presets.push_back(this->filament_presets[ams_filament_presets.size()]);
                     ams_filament_colors.push_back(filament_color);
                     ams_filament_color_types.push_back(filament_color_type);
