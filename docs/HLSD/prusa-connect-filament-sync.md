@@ -5,8 +5,13 @@ synchronization path. The sidebar's filament-sync action detects a Prusa Connect
 physical printer, obtains the authenticated printer list and selected printer's
 FFF GraphQL data, and converts each ordered Connect tool into an AMS tray
 configuration. Empty tools are retained as placeholders, material IDs and
-material types are passed to the normal preset matcher, and `colorRgba` values
-are normalized to Orca's `#RRGGBB` representation. `PresetBundle::sync_ams_list`
+material types are recorded, and `colorRgba` values are normalized to Orca's
+`#RRGGBB` representation. During synchronization, a slot keeps its existing
+local filament profile when its material type matches the Connect type; only the
+slot color is replaced. If the types differ, the synchronizer chooses a
+compatible local profile for the reported type before falling back to the
+Connect material ID or a generic profile. This prevents a Connect brand/material
+ID from replacing an otherwise suitable user profile. `PresetBundle::sync_ams_list`
 then performs the same compatibility fallback, project filament update,
 thumbnail/UI refresh, dirty-state handling, and synchronization badges used by
 other AMS-capable agents.
