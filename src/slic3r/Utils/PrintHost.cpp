@@ -105,6 +105,11 @@ std::string PrintHost::get_print_host_webui(DynamicPrintConfig* config)
     const auto  host_type     = host_type_opt != nullptr ? host_type_opt->value : htOctoPrint;
 
     switch (host_type) {
+    case htPrusaConnect:
+        // Connect authentication and filament synchronization run in the embedded
+        // Connect WebView; never reuse a stale local-host value from another preset.
+        webui_url = "https://connect.prusa3d.com";
+        break;
     case htElegooLink: {
         webui_url = ElegooLink::get_print_host_webui(config);
         break;
@@ -207,7 +212,7 @@ wxString PrintHost::format_error(const std::string &body, const std::string &err
         return wxString::Format("HTTP %u: %s", status, wxbody);
     } else {
         if (error.find("curl:Timeout was reached") != std::string::npos) {
-            return _L("Connection timed out. Please check if the printer and computer network are functioning properly, and confirm that they are on the same network.");
+            return timed_out_message();
         }else if(error.find("curl:Couldn't resolve host name")!= std::string::npos){
             return _L("The Hostname/IP/URL could not be parsed, please check it and try again.");
         } else if (error.find("Connection was reset") != std::string::npos){
@@ -217,6 +222,11 @@ wxString PrintHost::format_error(const std::string &body, const std::string &err
             return wxString::FromUTF8(error.data());
         }
     }
+}
+
+wxString PrintHost::timed_out_message()
+{
+    return _L("Connection timed out. Please check if the printer and computer network are functioning properly, and confirm that they are on the same network.");
 }
 
 

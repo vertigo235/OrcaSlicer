@@ -44,6 +44,7 @@
 #include "wxExtensions.hpp"
 #include "ConfigManipulation.hpp"
 #include "OptionsGroup.hpp"
+#include "OptionStateRegistry.hpp"
 #include "libslic3r/Preset.hpp"
 //BBS: GUI refactor
 #include "Notebook.hpp"
@@ -468,8 +469,9 @@ public:
 	std::pair<OG_CustomCtrl*, bool*> get_custom_ctrl_with_blinking_ptr(const t_config_option_key& opt_key, int opt_index = -1);
 
     Field*          get_field(const t_config_option_key &opt_key, Page** selected_page, int opt_index = -1);
-    void            toggle_option(const std::string &opt_key, bool toggle, int opt_index = -1);
-    void            toggle_line(const std::string &opt_key, bool toggle, int opt_index = -1); // BBS: hide some line
+    void            toggle_option(const std::string &opt_key, bool toggle, int opt_index = -1, const wxString& reason = {});
+    void            toggle_line(const std::string &opt_key, bool toggle, int opt_index = -1, const wxString& reason = {});
+    const OptionStateRegistry& option_state_registry() const { return m_option_state_registry; }
     // Renames the row that owns the option. `label` is the untranslated English msgid (an L("...")
     // string); it is translated for display and kept as the row's English search alias.
     void            set_option_label(const std::string &opt_key, const wxString &label, int opt_index = -1);
@@ -560,11 +562,15 @@ protected:
     void			filter_diff_option(std::vector<std::string> &options);
 
     ConfigManipulation m_config_manipulation;
+    OptionStateRegistry m_option_state_registry;
     std::string m_last_sparse_infill_rotate_template_value;
     ConfigManipulation get_config_manipulation();
     friend class EditGCodeDialog;
     friend class PublishSettingsDialog;
 };
+
+// Resolves the same object/global settings owner for navigation and availability descriptions.
+Tab* get_tab_for_option(const std::string& opt_key, Preset::Type type);
 
 class TabPrint : public Tab
 {
@@ -581,6 +587,9 @@ public:
 	void		update() override;
 	void		clear_pages() override;
 	bool 		supports_printer_technology(const PrinterTechnology tech) const override { return tech == ptFFF; }
+	// Column of the extruder's variant in the per-variant process vectors, as the extruder switch
+	// selects it; -1 when the printer has no such extruder variant.
+	int			extruder_variant_index(int extruder_id, NozzleVolumeType nozzle_type);
 
 private:
 	ogStaticText*	m_recommended_thin_wall_thickness_description_line = nullptr;
